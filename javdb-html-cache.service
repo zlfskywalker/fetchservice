@@ -1,0 +1,18 @@
+[Unit]
+Description=JavDB HTML Cache Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+Group=pi
+WorkingDirectory=/opt/javdb-html-cache
+Environment=PYTHONUNBUFFERED=1
+Environment=HTML_CACHE_DIR=/opt/javdb-html-cache/cache
+Environment=HTML_CACHE_TTL_SECONDS=21600
+ExecStart=/opt/javdb-html-cache/.venv/bin/uvicorn app:app --host 0.0.0.0 --port 8765
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
