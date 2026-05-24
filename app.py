@@ -8,7 +8,10 @@ from urllib.parse import quote_plus
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 
 
 BASE_URL = 'https://javdb.com'
@@ -66,51 +69,54 @@ def store_cached_html(url, html, ttl_seconds=None):
         json.dump(payload, handle)
 
 
-def get_html_with_playwright(url: str, timeout: int = 30000) -> str:
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+def get_html_with_selenium(url: str, timeout: int = 30) -> str:
+    options = Options()
 
-        context = browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1366, "height": 768},
-            locale="en-US",
-            extra_http_headers={
-                "Accept-Language": "en-US,en;q=0.9",
-            }
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1366,768")
+
+    options.add_argument(
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0.0.0 Safari/537.36"
+    )
+
+    # Raspberry Pi path is usually this:
+    service = Service("/usr/bin/chromedriver")
+
+    driver = None
+
+    try:
+        driver = webdriver.Chrome(service=service, options=options)
+        driver.set_page_load_timeout(timeout)
+
+        driver.get(url)
+
+        # Wait a little for JavaScript-rendered content
+        time.sleep(3)
+
+        html = driver.page_source
+
+        if not html:
+            raise HTTPException(
+                status_code=502,
+                detail="Selenium returned empty HTML"
+            )
+
+        return html
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to fetch URL with Selenium: {str(e)}"
         )
 
-        page = context.new_page()
-
-        try:
-            response = page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=timeout
-            )
-
-            if response and response.status >= 400:
-                raise HTTPException(
-                    status_code=response.status,
-                    detail=f'Failed to fetch URL with Playwright. Status: {response.status}'
-                )
-
-            page.wait_for_timeout(3000)
-
-            return page.content()
-
-        except PlaywrightTimeoutError:
-            raise HTTPException(
-                status_code=504,
-                detail=f'Timeout loading URL: {url}'
-            )
-
-        finally:
-            context.close()
-            browser.close()
+    finally:
+        if driver:
+            driver.quit()
 
 
 def get_or_fetch_html(url: str) -> str:
@@ -119,13 +125,7 @@ def get_or_fetch_html(url: str) -> str:
     if html is not None:
         return html
 
-    html = get_html_with_playwright(url)
-
-    if not html:
-        raise HTTPException(
-            status_code=502,
-            detail='Playwright returned empty HTML'
-        )
+    html = get_html_with_selenium(url)
 
     store_cached_html(url, html)
 
