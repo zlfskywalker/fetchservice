@@ -16,6 +16,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 import threading
 
+BASE_URL = 'https://javdb.com'
+SEARCH_URL = BASE_URL + '/search?q=%s'
+CACHE_DIR = os.environ.get('HTML_CACHE_DIR', './cache')
+DEFAULT_TTL_SECONDS = int(os.environ.get('HTML_CACHE_TTL_SECONDS', '21600'))
+
 # Globally selenium Chrome
 options = Options()
 
@@ -34,6 +39,8 @@ prefs = {
 options.add_experimental_option("prefs", prefs)
 
 service = Service("/usr/bin/chromedriver")
+
+app = FastAPI(title='JAVDB HTML Cache Service')
 
 # Create ONE global browser instance
 driver = None
@@ -54,19 +61,13 @@ def shutdown_event():
         driver = None
 
 
-BASE_URL = 'https://javdb.com'
-SEARCH_URL = BASE_URL + '/search?q=%s'
-CACHE_DIR = os.environ.get('HTML_CACHE_DIR', './cache')
-DEFAULT_TTL_SECONDS = int(os.environ.get('HTML_CACHE_TTL_SECONDS', '21600'))
-
-
 class StoreRequest(BaseModel):
     url: str
     html: str
     ttl_seconds: Optional[int] = None
 
 
-app = FastAPI(title='JAVDB HTML Cache Service')
+
 
 
 def ensure_cache_dir():
