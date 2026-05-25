@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
 
 
 BASE_URL = 'https://javdb.com'
@@ -77,16 +79,17 @@ def get_html_with_selenium(url: str, timeout: int = 30) -> str:
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1366,768")
+    options.add_argument("--blink-settings=imagesEnabled=false")
 
-    options.add_argument(
-        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36"
-    )
+    options.page_load_strategy = "eager"  # don't wait for every image/resource
 
-    # Raspberry Pi path is usually this:
+    prefs = {
+        "profile.managed_default_content_settings.images": 2,
+        "profile.default_content_setting_values.notifications": 2,
+    }
+    options.add_experimental_option("prefs", prefs)
+
     service = Service("/usr/bin/chromedriver")
-
     driver = None
 
     try:
@@ -95,16 +98,15 @@ def get_html_with_selenium(url: str, timeout: int = 30) -> str:
 
         driver.get(url)
 
-        # Wait a little for JavaScript-rendered content
-        time.sleep(3)
+        # Better than fixed sleep: short wait for body to exist
+        WebDriverWait(driver, 5).until(
+            lambda d: d.find_element(By.TAG_NAME, "body")
+        )
 
         html = driver.page_source
 
         if not html:
-            raise HTTPException(
-                status_code=502,
-                detail="Selenium returned empty HTML"
-            )
+            raise HTTPException(status_code=502, detail="Selenium returned empty HTML")
 
         return html
 
