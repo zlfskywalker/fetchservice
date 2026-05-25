@@ -36,10 +36,22 @@ options.add_experimental_option("prefs", prefs)
 service = Service("/usr/bin/chromedriver")
 
 # Create ONE global browser instance
-driver = webdriver.Chrome(service=service, options=options)
-
-# Selenium is not thread-safe
+driver = None
 driver_lock = threading.Lock()
+
+
+@app.on_event("startup")
+def startup_event():
+    global driver
+    driver = webdriver.Chrome(service=service, options=options)
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    global driver
+    if driver:
+        driver.quit()
+        driver = None
 
 
 BASE_URL = 'https://javdb.com'
@@ -98,10 +110,14 @@ def store_cached_html(url, html, ttl_seconds=None):
 
 
 def get_html_with_selenium(url: str, timeout: int = 30) -> str:
-   try:
+    global driver
+
+    if driver is None:
+        raise HTTPException(status_code=503, detail="Selenium driver is not ready")
+
+    try:
         with driver_lock:
             driver.set_page_load_timeout(timeout)
-
             driver.get(url)
 
             WebDriverWait(driver, 5).until(
@@ -111,10 +127,7 @@ def get_html_with_selenium(url: str, timeout: int = 30) -> str:
             html = driver.page_source
 
             if not html:
-                raise HTTPException(
-                    status_code=502,
-                    detail="Selenium returned empty HTML"
-                )
+                raise HTTPException(status_code=502, detail="Selenium returned empty HTML")
 
             return html
 
