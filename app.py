@@ -14,6 +14,32 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
+import threading
+
+# Globally selenium Chrome
+options = Options()
+
+options.add_argument("--headless=new")
+options.add_argument("--no-sandbox")
+options.add_argument("--disable-dev-shm-usage")
+options.add_argument("--disable-gpu")
+options.add_argument("--window-size=1366,768")
+options.add_argument("--blink-settings=imagesEnabled=false")
+
+options.page_load_strategy = "eager" # don't wait for every image/resource
+
+prefs = {
+    "profile.managed_default_content_settings.images": 2
+}
+options.add_experimental_option("prefs", prefs)
+
+service = Service("/usr/bin/chromedriver")
+
+# Create ONE global browser instance
+driver = webdriver.Chrome(service=service, options=options)
+
+# Selenium is not thread-safe
+driver_lock = threading.Lock()
 
 
 BASE_URL = 'https://javdb.com'
@@ -72,53 +98,31 @@ def store_cached_html(url, html, ttl_seconds=None):
 
 
 def get_html_with_selenium(url: str, timeout: int = 30) -> str:
-    options = Options()
+   try:
+        with driver_lock:
+            driver.set_page_load_timeout(timeout)
 
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1366,768")
-    options.add_argument("--blink-settings=imagesEnabled=false")
+            driver.get(url)
 
-    options.page_load_strategy = "eager"  # don't wait for every image/resource
+            WebDriverWait(driver, 5).until(
+                lambda d: d.find_element(By.TAG_NAME, "body")
+            )
 
-    prefs = {
-        "profile.managed_default_content_settings.images": 2,
-        "profile.default_content_setting_values.notifications": 2,
-    }
-    options.add_experimental_option("prefs", prefs)
+            html = driver.page_source
 
-    service = Service("/usr/bin/chromedriver")
-    driver = None
+            if not html:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Selenium returned empty HTML"
+                )
 
-    try:
-        driver = webdriver.Chrome(service=service, options=options)
-        driver.set_page_load_timeout(timeout)
-
-        driver.get(url)
-
-        # Better than fixed sleep: short wait for body to exist
-        WebDriverWait(driver, 5).until(
-            lambda d: d.find_element(By.TAG_NAME, "body")
-        )
-
-        html = driver.page_source
-
-        if not html:
-            raise HTTPException(status_code=502, detail="Selenium returned empty HTML")
-
-        return html
+            return html
 
     except Exception as e:
         raise HTTPException(
             status_code=502,
             detail=f"Failed to fetch URL with Selenium: {str(e)}"
         )
-
-    finally:
-        if driver:
-            driver.quit()
 
 
 def get_or_fetch_html(url: str) -> str:
